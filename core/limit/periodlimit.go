@@ -29,6 +29,9 @@ var (
 	ErrUnknownCode = errors.New("unknown status code")
 
 	// to be compatible with aliyun redis, we cannot use `local key = KEYS[1]` to reuse the key
+	// --KYES[1]:限流器key 例如openApi场景key可以是商户唯一标识
+	// --ARGV[1]:qos,单位时间内最多请求次数
+	// --ARGV[2]:单位限流窗口时间
 	periodScript = redis.NewScript(`local limit = tonumber(ARGV[1])
 local window = tonumber(ARGV[2])
 local current = redis.call("INCRBY", KEYS[1], 1)
@@ -50,7 +53,9 @@ type (
 
 	// A PeriodLimit is used to limit requests during a period of time.
 	PeriodLimit struct {
-		period     int
+		// 窗口大小，单位s
+		period int
+		// 请求上限
 		quota      int
 		limitStore *redis.Redis
 		keyPrefix  string
@@ -76,11 +81,18 @@ func NewPeriodLimit(period, quota int, limitStore *redis.Redis, keyPrefix string
 }
 
 // Take requests a permit, it returns the permit state.
+// https://juejin.cn/post/7026645846280110117
 func (h *PeriodLimit) Take(key string) (int, error) {
 	return h.TakeCtx(context.Background(), key)
 }
 
 // TakeCtx requests a permit with context, it returns the permit state.
+// 执行限流
+// 注意一下返回值：
+// 0：表示错误，比如可能是redis故障、过载
+// 1：允许
+// 2：允许但是当前窗口内已到达上限
+// 3：拒绝
 func (h *PeriodLimit) TakeCtx(ctx context.Context, key string) (int, error) {
 	resp, err := h.limitStore.ScriptRunCtx(ctx, periodScript, []string{h.keyPrefix + key}, []string{
 		strconv.Itoa(h.quota),
@@ -107,6 +119,10 @@ func (h *PeriodLimit) TakeCtx(ctx context.Context, key string) (int, error) {
 	}
 }
 
+// 计算过期时间也就是窗口时间大小
+// 如果align==true
+// 线性限流，开启此选项后可以实现周期性的限流
+// 比如quota=5时，quota实际值可能会是5.4.3.2.1呈现出周期性变化
 func (h *PeriodLimit) calcExpireSeconds() int {
 	if h.align {
 		now := time.Now()
