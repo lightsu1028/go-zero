@@ -21,6 +21,10 @@ const (
 )
 
 // to be compatible with aliyun redis, we cannot use `local key = KEYS[1]` to reuse the key
+// ARGV[1]--每秒生成token数量即token生成速度 单位秒
+// ARGV[2]--桶容量
+// ARGV[3]--当前时间戳
+// ARGV[4]--当前请求token数量
 // KEYS[1] as tokens_key
 // KEYS[2] as timestamp_key
 var script = redis.NewScript(`local rate = tonumber(ARGV[1])
